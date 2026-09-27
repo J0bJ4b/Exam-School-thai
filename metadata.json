@@ -1,0 +1,6 @@
+{
+  "name": "ระบบออกข้อสอบประถม & จอทีวีห้องเรียน AI (Primary Exam TV)",
+  "description": "ระบบสร้างข้อสอบประถม ป.1-6 ทุกกลุ่มสาระด้วย AI 20-40 ข้อ พร้อมโหมดฉายจอทีวีห้องเรียน รีโมทควบคุมสำหรับครู และหน้าเฉลยละเอียด",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
