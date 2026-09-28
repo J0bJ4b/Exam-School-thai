@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GradeLevel, SubjectId, ExamSet } from '../types/exam';
 import { SUBJECTS, GRADE_LEVELS } from '../data/subjects';
 import { generateCurriculumExam } from '../data/curriculumGenerator';
@@ -17,6 +17,9 @@ import {
   Flame,
   HelpCircle,
   Zap,
+  Cpu,
+  Key,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface ExamGeneratorModalProps {
@@ -24,6 +27,61 @@ interface ExamGeneratorModalProps {
   onClose: () => void;
   onExamGenerated: (exam: ExamSet) => void;
 }
+
+export type AIProviderId = 'auto' | 'gemini' | 'groq' | 'openai' | 'openrouter' | 'deepseek';
+
+interface AIProviderInfo {
+  id: AIProviderId;
+  name: string;
+  badge: string;
+  desc: string;
+  badgeColor: string;
+}
+
+const AI_PROVIDERS: AIProviderInfo[] = [
+  {
+    id: 'auto',
+    name: 'Auto Smart (แนะนำ)',
+    badge: 'ฉลาดสุด',
+    desc: 'สลับอัตโนมัติเมื่อคิวเต็ม (Gemini -> Groq/OpenAI -> คลัง สพฐ.)',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  },
+  {
+    id: 'gemini',
+    name: 'Google Gemini',
+    badge: 'ทางการ',
+    desc: 'Gemini 3.8 / 3.1 Flash สำหรับประถมไทย',
+    badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  },
+  {
+    id: 'groq',
+    name: 'Groq (Llama 3.3)',
+    badge: 'เร็วสุด ⚡',
+    desc: 'ประมวลผลเร็ว 1-2 วินาทีเสร็จ ฟรี และไม่ติดคิว',
+    badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI (ChatGPT)',
+    badge: 'แม่นยำสูง',
+    desc: 'GPT-4o Mini เสถียรสูงและไวยากรณ์ยอดเยี่ยม',
+    badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    badge: 'รวมทุกค่าย',
+    desc: 'รวมโมเดลชั้นนำทั่วโลกผ่าน API เดียว',
+    badgeColor: 'bg-pink-500/20 text-pink-300 border-pink-500/30',
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    badge: 'เก่งวิทย์-คณิต',
+    desc: 'DeepSeek V3 เก่งคำนวณและข้อสอบตรรกะ',
+    badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+  },
+];
 
 export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
   isOpen,
@@ -38,9 +96,46 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
   const [termType, setTermType] = useState<'ทั่วไป' | 'กลางภาค' | 'ปลายภาค' | 'เตรียมสอบแข่งขัน/O-NET'>('กลางภาค');
   const [timerPerQuestion, setTimerPerQuestion] = useState<number>(60);
   const [additionalPrompt, setAdditionalPrompt] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState<AIProviderId>('auto');
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [serverProviders, setServerProviders] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [is503Error, setIs503Error] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetch('/api/ai/providers')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && typeof data === 'object') {
+            setServerProviders(data);
+          }
+        })
+        .catch(() => {});
+      const saved = localStorage.getItem(`ai_key_${selectedProvider}`);
+      if (saved) setCustomApiKey(saved);
+    }
+  }, [isOpen, selectedProvider]);
+
+  const handleProviderSelect = (pId: AIProviderId) => {
+    setSelectedProvider(pId);
+    const saved = localStorage.getItem(`ai_key_${pId}`);
+    setCustomApiKey(saved || '');
+    if (pId !== 'auto' && pId !== 'gemini') {
+      setShowKeyInput(true);
+    }
+  };
+
+  const handleKeyChange = (val: string) => {
+    setCustomApiKey(val);
+    if (val.trim()) {
+      localStorage.setItem(`ai_key_${selectedProvider}`, val.trim());
+    } else {
+      localStorage.removeItem(`ai_key_${selectedProvider}`);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -92,6 +187,8 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
           difficulty,
           termType,
           additionalPrompt: additionalPrompt.trim(),
+          provider: selectedProvider,
+          customApiKey: customApiKey.trim() || undefined,
         }),
       });
 
@@ -213,6 +310,103 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* AI Model & Provider Selector */}
+          <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-purple-400" />
+                <span>เลือกโมเดล AI สำหรับออกข้อสอบ:</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowKeyInput(!showKeyInput)}
+                className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors"
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span>{showKeyInput ? 'ซ่อนช่องใส่ API Key' : 'ตั้งค่า API Key เอง'}</span>
+              </button>
+            </div>
+
+            {/* Provider Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {AI_PROVIDERS.map((prov) => {
+                const isSelected = selectedProvider === prov.id;
+                const hasServerKey =
+                  prov.id === 'auto' ||
+                  (prov.id === 'gemini' && serverProviders.gemini) ||
+                  (prov.id === 'groq' && serverProviders.groq) ||
+                  (prov.id === 'openai' && serverProviders.openai) ||
+                  (prov.id === 'openrouter' && serverProviders.openrouter) ||
+                  (prov.id === 'deepseek' && serverProviders.deepseek);
+
+                return (
+                  <button
+                    key={prov.id}
+                    type="button"
+                    onClick={() => handleProviderSelect(prov.id)}
+                    className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                      isSelected
+                        ? 'bg-gradient-to-br from-indigo-950/90 to-purple-950/90 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                        : 'bg-slate-900/80 hover:bg-slate-800/80 border-slate-800'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className="text-xs font-bold text-slate-100 truncate">{prov.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${prov.badgeColor}`}>
+                          {prov.badge}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                        {prov.desc}
+                      </p>
+                    </div>
+
+                    <div className="mt-2 pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
+                      {hasServerKey ? (
+                        <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>พร้อมใช้</span>
+                        </span>
+                      ) : (
+                        <span className="text-amber-400/90 flex items-center gap-1">
+                          <Key className="w-3 h-3" />
+                          <span>ใส่ Key</span>
+                        </span>
+                      )}
+                      {isSelected && <span className="text-indigo-400 font-bold">✓ เลือก</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom API Key Input Drawer */}
+            {(showKeyInput || (selectedProvider !== 'auto' && selectedProvider !== 'gemini')) && (
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-700/60 space-y-2 mt-2">
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span className="font-semibold flex items-center gap-1.5 text-indigo-300">
+                    <Key className="w-3.5 h-3.5" />
+                    <span>API Key สำหรับ {AI_PROVIDERS.find((p) => p.id === selectedProvider)?.name}:</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    (จะบันทึกในเบราว์เซอร์เครื่องนี้เท่านั้น)
+                  </span>
+                </div>
+                <input
+                  type="password"
+                  value={customApiKey}
+                  onChange={(e) => handleKeyChange(e.target.value)}
+                  placeholder={`วาง API Key ของ ${selectedProvider.toUpperCase()} ที่นี่ (หากไม่ได้ใส่ใน Environment Variables)`}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-200 placeholder:text-slate-500 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-[10px] text-slate-400">
+                  💡 หากคุณตั้งค่า Key ใน Vercel Environment Variables ไว้แล้ว สามารถเว้นว่างช่องนี้ได้เลย
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* 1. Grade Level Selector */}
           <div>
@@ -374,8 +568,9 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
 
         {/* Modal Footer */}
         <div className="px-6 md:px-8 py-5 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
-          <div className="text-xs text-slate-400">
-            ระบบใช้ Gemini AI สร้างข้อสอบ 4 ตัวเลือกพร้อมเฉลยละเอียด
+          <div className="text-xs text-slate-400 flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+            <span>ใช้โมเดล: <strong className="text-indigo-300">{AI_PROVIDERS.find((p) => p.id === selectedProvider)?.name}</strong></span>
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">

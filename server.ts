@@ -91,7 +91,19 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
-// API: Generate Exam with Gemini
+// API: Check available AI providers and server configuration
+app.get('/api/ai/providers', (req, res) => {
+  res.json({
+    gemini: Boolean(process.env.GEMINI_API_KEY),
+    groq: Boolean(process.env.GROQ_API_KEY),
+    openai: Boolean(process.env.OPENAI_API_KEY),
+    openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+    deepseek: Boolean(process.env.DEEPSEEK_API_KEY),
+    defaultProvider: process.env.AI_PROVIDER || 'gemini',
+  });
+});
+
+// API: Generate Exam with Multi-AI Provider
 app.post('/api/gemini/generate-exam', async (req, res) => {
   try {
     const {
@@ -102,6 +114,8 @@ app.post('/api/gemini/generate-exam', async (req, res) => {
       difficulty = 'ปานกลาง',
       termType = 'ทั่วไป',
       additionalPrompt = '',
+      provider = 'auto', // 'auto' | 'gemini' | 'groq' | 'openai' | 'openrouter' | 'deepseek'
+      customApiKey = '', // Optional key provided directly from user in UI
     } = req.body;
 
     const count = Math.min(Math.max(Number(questionCount) || 20, 5), 40);
@@ -127,43 +141,51 @@ ${additionalPrompt ? `- คำขอเพิ่มเติมจากคร�
 ให้ออกข้อสอบจำนวนครบทั้ง ${count} ข้อ พร้อมตัวเลือก ก, ข, ค, ง และเฉลยพร้อมคำอธิบายภาษาไทย`;
 
     let jsonText = '';
-    const configuredProvider = (process.env.AI_PROVIDER || '').toLowerCase();
+    const targetProvider = (provider !== 'auto' ? provider : (process.env.AI_PROVIDER || 'gemini')).toLowerCase();
 
-    // Check if an alternative AI provider is explicitly selected
-    if (configuredProvider === 'openai' && process.env.OPENAI_API_KEY) {
+    // Check selected AI provider
+    if (targetProvider === 'openai') {
+      const key = customApiKey || process.env.OPENAI_API_KEY;
+      if (!key) throw new Error('ไม่พบ OpenAI API Key (กรุณากรอกในกล่องตั้งค่า หรือตั้งใน Environment Variables)');
       jsonText = await callOpenAICompatible(
         'https://api.openai.com/v1/chat/completions',
-        process.env.OPENAI_API_KEY,
+        key,
         process.env.OPENAI_MODEL || 'gpt-4o-mini',
         systemInstruction,
         promptText
       );
-    } else if (configuredProvider === 'groq' && process.env.GROQ_API_KEY) {
+    } else if (targetProvider === 'groq') {
+      const key = customApiKey || process.env.GROQ_API_KEY;
+      if (!key) throw new Error('ไม่พบ Groq API Key (กรุณากรอกในกล่องตั้งค่า หรือตั้งใน Environment Variables)');
       jsonText = await callOpenAICompatible(
         'https://api.groq.com/openai/v1/chat/completions',
-        process.env.GROQ_API_KEY,
+        key,
         process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
         systemInstruction,
         promptText
       );
-    } else if (configuredProvider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+    } else if (targetProvider === 'openrouter') {
+      const key = customApiKey || process.env.OPENROUTER_API_KEY;
+      if (!key) throw new Error('ไม่พบ OpenRouter API Key (กรุณากรอกในกล่องตั้งค่า หรือตั้งใน Environment Variables)');
       jsonText = await callOpenAICompatible(
         'https://openrouter.ai/api/v1/chat/completions',
-        process.env.OPENROUTER_API_KEY,
+        key,
         process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct',
         systemInstruction,
         promptText
       );
-    } else if (configuredProvider === 'deepseek' && process.env.DEEPSEEK_API_KEY) {
+    } else if (targetProvider === 'deepseek') {
+      const key = customApiKey || process.env.DEEPSEEK_API_KEY;
+      if (!key) throw new Error('ไม่พบ DeepSeek API Key (กรุณากรอกในกล่องตั้งค่า หรือตั้งใน Environment Variables)');
       jsonText = await callOpenAICompatible(
         'https://api.deepseek.com/chat/completions',
-        process.env.DEEPSEEK_API_KEY,
+        key,
         process.env.DEEPSEEK_MODEL || 'deepseek-chat',
         systemInstruction,
         promptText
       );
     } else {
-      // Default to Google Gemini with retry loop
+      // Default to Google Gemini with retry loop and failover
       const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
       let response: any = null;
       let lastError: any = null;
