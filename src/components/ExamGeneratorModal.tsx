@@ -27,6 +27,7 @@ import {
   loadAISettings,
   saveAISettings,
 } from '../services/aiSettings';
+import { generateExamDirectFromBrowser } from '../services/aiDirectClient';
 
 interface ExamGeneratorModalProps {
   isOpen: boolean;
@@ -229,19 +230,54 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
 
       let data: any = null;
       const responseText = await response.text();
+      let parseFailed = false;
+
       try {
         data = JSON.parse(responseText);
       } catch (jsonErr) {
-        // If Vercel returned HTML or text error (e.g. 504 Gateway Timeout or 500 Server Error)
-        console.error('Non-JSON response from server:', responseText);
-        throw new Error(
-          response.status === 504 || response.status === 408
-            ? 'การสร้างข้อสอบใช้เวลานานเกินกว่ากำหนด (Timeout) แนะนำให้ลดจำนวนข้อเหลือ 20 ข้อ หรือใช้ปุ่มสร้างด่วนจากคลัง สพฐ.'
-            : `เซิร์ฟเวอร์ตอบกลับผิดพลาด (${response.status}): ${responseText.slice(0, 120)}... แนะนำให้ตรวจสอบ API Key ใน Vercel หรือกดใช้คลัง สพฐ.`
-        );
+        parseFailed = true;
       }
 
-      if (!response.ok || !data?.success) {
+      // If server returned non-JSON (like Vercel FUNCTION_INVOCATION_FAILED 500) OR error status:
+      // Try generating directly from browser if user has a customApiKey or provider key!
+      if (parseFailed || !response.ok || !data?.success) {
+        const storedSettings = loadAISettings();
+        const storedKey = selectedProvider !== 'auto' ? storedSettings.keys[selectedProvider as keyof typeof storedSettings.keys] : '';
+        const activeKey = customApiKey.trim() || storedKey;
+        if (activeKey && selectedProvider !== 'auto') {
+          console.warn('Server failed, attempting direct client generation with API key...');
+          try {
+            const directExam = await generateExamDirectFromBrowser({
+              grade: selectedGrade,
+              subject: currentSubject.name,
+              subjectId: selectedSubjectId,
+              topic: topic.trim(),
+              questionCount,
+              difficulty,
+              termType,
+              additionalPrompt: additionalPrompt.trim(),
+              provider: selectedProvider,
+              apiKey: activeKey,
+            });
+            directExam.timerPerQuestion = timerPerQuestion;
+            onExamGenerated(directExam);
+            onClose();
+            return;
+          } catch (directErr: any) {
+            console.error('Direct generation also failed:', directErr);
+            throw new Error(`การเชื่อมต่อผ่านเซิร์ฟเวอร์ล้มเหลว และการเรียกตรงไม่สำเร็จ: ${directErr?.message || directErr}`);
+          }
+        }
+
+        if (parseFailed) {
+          console.error('Non-JSON response from server:', responseText);
+          throw new Error(
+            response.status === 504 || response.status === 408
+              ? 'การสร้างข้อสอบใช้เวลานานเกินกว่ากำหนด (Timeout) แนะนำให้ลดจำนวนข้อเหลือ 20 ข้อ หรือใช้ปุ่มสร้างด่วนจากคลัง สพฐ.'
+              : `เซิร์ฟเวอร์ Vercel ขัดข้อง (${response.status}): คุณสามารถใส่ API Key ของคุณในเมนูตั้งค่า แล้วระบบจะเชื่อมต่อไปยัง AI โดยตรงโดยไม่ต้องพึ่ง Server หรือกดใช้ "สร้างด่วนจากคลัง สพฐ."`
+          );
+        }
+
         if (response.status === 503 || data?.is503) {
           setIs503Error(true);
         }
