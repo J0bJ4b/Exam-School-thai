@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GradeLevel, SubjectId, ExamSet } from '../types/exam';
 import { SUBJECTS, GRADE_LEVELS } from '../data/subjects';
+import { generateCurriculumExam } from '../data/curriculumGenerator';
 import {
   Sparkles,
   X,
@@ -15,6 +16,7 @@ import {
   RefreshCw,
   Flame,
   HelpCircle,
+  Zap,
 } from 'lucide-react';
 
 interface ExamGeneratorModalProps {
@@ -38,6 +40,7 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
   const [additionalPrompt, setAdditionalPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [is503Error, setIs503Error] = useState(false);
 
   if (!isOpen) return null;
 
@@ -51,6 +54,22 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
     }
   };
 
+  // Instant fallback to curriculum bank if AI service is busy or user wants instant generation
+  const handleInstantGenerate = () => {
+    const instantExam = generateCurriculumExam({
+      grade: selectedGrade,
+      subject: currentSubject.name,
+      subjectId: selectedSubjectId,
+      topic: topic.trim() || currentSubject.defaultTopics[0] || 'บทเรียนทั่วไป',
+      questionCount,
+      difficulty,
+      termType,
+    });
+    instantExam.timerPerQuestion = timerPerQuestion;
+    onExamGenerated(instantExam);
+    onClose();
+  };
+
   const handleGenerate = async () => {
     if (!topic.trim()) {
       setErrorMessage('กรุณาระบุหัวข้อหรือเนื้อหาข้อสอบที่ต้องการ');
@@ -59,6 +78,7 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
 
     setIsLoading(true);
     setErrorMessage('');
+    setIs503Error(false);
 
     try {
       const response = await fetch('/api/gemini/generate-exam', {
@@ -78,6 +98,9 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
       const data = await response.json();
 
       if (!response.ok || !data.success) {
+        if (response.status === 503 || data.is503) {
+          setIs503Error(true);
+        }
         throw new Error(data.error || 'เกิดข้อผิดพลาดในการสร้างข้อสอบ');
       }
 
@@ -91,6 +114,14 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error(err);
+      const is503 =
+        err?.message?.includes('503') ||
+        err?.message?.includes('high demand') ||
+        err?.message?.includes('หนาแน่น') ||
+        is503Error;
+      if (is503) {
+        setIs503Error(true);
+      }
       setErrorMessage(
         err.message || 'ไม่สามารถติดต่อ AI เพื่อสร้างข้อสอบได้ กรุณาตรวจสอบการเชื่อมต่อและลองใหม่อีกครั้ง'
       );
@@ -132,11 +163,42 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 md:p-8 space-y-6 max-h-[75vh] overflow-y-auto">
-          {/* Error Banner */}
+          {/* Error Banner with 503 / High Demand Fallback */}
           {errorMessage && (
-            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-3 text-rose-300 text-sm">
-              <AlertCircle className="w-5 h-5 flex-shrink-0 text-rose-400" />
-              <span>{errorMessage}</span>
+            <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 text-amber-200 text-sm space-y-3 shadow-lg">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 flex-shrink-0 text-amber-400 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="font-bold text-amber-300 text-base mb-1">
+                    {is503Error
+                      ? 'เซิร์ฟเวอร์ AI กำลังมีผู้ใช้งานหนาแน่นชั่วคราว (Google Gemini 503: High Demand)'
+                      : 'พบข้อผิดพลาดในการเชื่อมต่อกับ AI'}
+                  </h4>
+                  <p className="text-xs text-slate-300 leading-relaxed">{errorMessage}</p>
+                </div>
+              </div>
+
+              {/* Action Buttons for Error */}
+              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-500/20">
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  disabled={isLoading}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-600 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>ลองใหม่อีกครั้ง (Retry)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleInstantGenerate}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl shadow-md transition-all hover:scale-[1.02]"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>สร้างทันทีจากคลังมาตรฐาน สพฐ. (ไม่ต้องรอ AI)</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -304,11 +366,22 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
             ระบบใช้ Gemini AI สร้างข้อสอบ 4 ตัวเลือกพร้อมเฉลยละเอียด
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              type="button"
+              onClick={handleInstantGenerate}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 text-xs md:text-sm font-semibold transition-all hover:scale-[1.01]"
+              title="สร้างข้อสอบตามมาตรฐาน สพฐ. ทันทีโดยไม่ต้องรอ AI"
+            >
+              <Zap className="w-4 h-4 text-emerald-400" />
+              <span className="hidden sm:inline">สร้างด่วนจาก</span>คลัง สพฐ.
+            </button>
+
             <button
               onClick={onClose}
               disabled={isLoading}
-              className="px-5 py-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm font-semibold transition-colors"
+              className="px-4 py-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm font-semibold transition-colors"
             >
               ยกเลิก
             </button>
@@ -316,7 +389,7 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
             <button
               onClick={handleGenerate}
               disabled={isLoading}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold text-sm shadow-xl shadow-indigo-600/30 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-5 md:px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold text-sm shadow-xl shadow-indigo-600/30 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>
@@ -326,7 +399,7 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  <span>สั่ง AI ออกข้อสอบทันที ({questionCount} ข้อ)</span>
+                  <span>สั่ง AI ออกข้อสอบ ({questionCount} ข้อ)</span>
                 </>
               )}
             </button>

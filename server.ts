@@ -86,52 +86,87 @@ ${additionalPrompt ? `- คำขอเพิ่มเติมจากคร�
 
 ให้ออกข้อสอบจำนวนครบทั้ง ${count} ข้อ พร้อมตัวเลือก ก, ข, ค, ง และเฉลยพร้อมคำอธิบายภาษาไทย`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: promptText,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: {
-              type: Type.STRING,
-              description: 'ชื่อชุดข้อสอบ เช่น แบบทดสอบวิทยาศาสตร์ ป.3 เรื่องวัฏจักรชีวิต',
-            },
-            questions: {
-              type: Type.ARRAY,
-              description: `รายการข้อสอบทั้งหมด ${count} ข้อ`,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  number: { type: Type.INTEGER, description: 'ลำดับข้อสอบ 1, 2, ...' },
-                  question: { type: Type.STRING, description: 'โจทย์คำถามภาษาไทยที่ชัดเจน' },
-                  choices: {
-                    type: Type.ARRAY,
-                    description: 'ตัวเลือก 4 ข้อ ก ข ค ง',
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        key: { type: Type.STRING, description: 'ก หรือ ข หรือ ค หรือ ง' },
-                        text: { type: Type.STRING, description: 'เนื้อหาตัวเลือก' },
-                      },
-                      required: ['key', 'text'],
-                    },
-                  },
-                  correctAnswer: { type: Type.STRING, description: 'ตัวเลือกที่ถูกต้อง เช่น ก, ข, ค หรือ ง' },
-                  explanation: { type: Type.STRING, description: 'คำอธิบายเฉลยอย่างละเอียดและเข้าใจง่ายสำหรับเด็ก' },
-                  teachingTip: { type: Type.STRING, description: 'คำแนะนำการสอนสำหรับครู หรือจุดที่เด็กมักเข้าใจผิด' },
+    // Attempt generation with automatic retry and model failover for 503/high demand
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    let response: any = null;
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < modelsToTry.length; attempt++) {
+      const currentModel = modelsToTry[attempt];
+      try {
+        response = await ai.models.generateContent({
+          model: currentModel,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: {
+                  type: Type.STRING,
+                  description: 'ชื่อชุดข้อสอบ เช่น แบบทดสอบวิทยาศาสตร์ ป.3 เรื่องวัฏจักรชีวิต',
                 },
-                required: ['number', 'question', 'choices', 'correctAnswer', 'explanation'],
+                questions: {
+                  type: Type.ARRAY,
+                  description: `รายการข้อสอบทั้งหมด ${count} ข้อ`,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      number: { type: Type.INTEGER, description: 'ลำดับข้อสอบ 1, 2, ...' },
+                      question: { type: Type.STRING, description: 'โจทย์คำถามภาษาไทยที่ชัดเจน' },
+                      choices: {
+                        type: Type.ARRAY,
+                        description: 'ตัวเลือก 4 ข้อ ก ข ค ง',
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            key: { type: Type.STRING, description: 'ก หรือ ข หรือ ค หรือ ง' },
+                            text: { type: Type.STRING, description: 'เนื้อหาตัวเลือก' },
+                          },
+                          required: ['key', 'text'],
+                        },
+                      },
+                      correctAnswer: { type: Type.STRING, description: 'ตัวเลือกที่ถูกต้อง เช่น ก, ข, ค หรือ ง' },
+                      explanation: { type: Type.STRING, description: 'คำอธิบายเฉลยอย่างละเอียดและเข้าใจง่ายสำหรับเด็ก' },
+                      teachingTip: { type: Type.STRING, description: 'คำแนะนำการสอนสำหรับครู หรือจุดที่เด็กมักเข้าใจผิด' },
+                    },
+                    required: ['number', 'question', 'choices', 'correctAnswer', 'explanation'],
+                  },
+                },
               },
+              required: ['title', 'questions'],
             },
           },
-          required: ['title', 'questions'],
-        },
-      },
-    });
+        });
+        if (response && response.text) {
+          break; // Success!
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Attempt ${attempt + 1} with ${currentModel} failed:`, err?.message || err);
+        const errMsg = String(err?.message || '');
+        const is503OrBusy =
+          err?.status === 503 ||
+          err?.code === 503 ||
+          errMsg.includes('503') ||
+          errMsg.includes('high demand') ||
+          errMsg.includes('UNAVAILABLE') ||
+          errMsg.includes('Resource has been exhausted');
+
+        if (is503OrBusy && attempt < modelsToTry.length - 1) {
+          // Wait 1.2s before trying the next flash model
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+        } else if (!is503OrBusy) {
+          throw err;
+        }
+      }
+    }
+
+    if (!response || !response.text) {
+      throw lastError || new Error('Model unavailable');
+    }
 
     const jsonText = response.text || '{}';
     const parsedData = JSON.parse(jsonText);
@@ -167,9 +202,22 @@ ${additionalPrompt ? `- คำขอเพิ่มเติมจากคร�
     return res.json({ success: true, exam: resultExam });
   } catch (error: any) {
     console.error('Error generating exam with Gemini:', error);
-    return res.status(500).json({
+    const errMsg = String(error?.message || '');
+    const is503 =
+      error?.status === 503 ||
+      error?.code === 503 ||
+      errMsg.includes('503') ||
+      errMsg.includes('high demand') ||
+      errMsg.includes('UNAVAILABLE');
+
+    const clientMsg = is503
+      ? 'เซิร์ฟเวอร์ AI ของ Google กำลังมีผู้ใช้งานหนาแน่นชั่วคราว (503 High Demand) กรุณากดลองอีกครั้งในอีกสักครู่ หรือเลือกสร้างจากคลังข้อสอบมาตรฐาน สพฐ. ได้ทันที'
+      : (error?.message || 'เกิดข้อผิดพลาดในการสร้างข้อสอบด้วย AI กรุณาลองใหม่อีกครั้ง');
+
+    return res.status(is503 ? 503 : 500).json({
       success: false,
-      error: error?.message || 'เกิดข้อผิดพลาดในการสร้างข้อสอบด้วย AI กรุณาลองใหม่อีกครั้ง',
+      is503,
+      error: clientMsg,
     });
   }
 });
