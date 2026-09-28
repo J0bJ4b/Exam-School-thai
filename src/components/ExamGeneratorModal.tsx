@@ -95,13 +95,25 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
         }),
       });
 
-      const data = await response.json();
+      let data: any = null;
+      const responseText = await response.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonErr) {
+        // If Vercel returned HTML or text error (e.g. 504 Gateway Timeout or 500 Server Error)
+        console.error('Non-JSON response from server:', responseText);
+        throw new Error(
+          response.status === 504 || response.status === 408
+            ? 'การสร้างข้อสอบใช้เวลานานเกินกว่ากำหนด (Timeout) แนะนำให้ลดจำนวนข้อเหลือ 20 ข้อ หรือใช้ปุ่มสร้างด่วนจากคลัง สพฐ.'
+            : `เซิร์ฟเวอร์ตอบกลับผิดพลาด (${response.status}): ${responseText.slice(0, 120)}... แนะนำให้ตรวจสอบ API Key ใน Vercel หรือกดใช้คลัง สพฐ.`
+        );
+      }
 
-      if (!response.ok || !data.success) {
-        if (response.status === 503 || data.is503) {
+      if (!response.ok || !data?.success) {
+        if (response.status === 503 || data?.is503) {
           setIs503Error(true);
         }
-        throw new Error(data.error || 'เกิดข้อผิดพลาดในการสร้างข้อสอบ');
+        throw new Error(data?.error || 'เกิดข้อผิดพลาดในการสร้างข้อสอบ');
       }
 
       const generatedExam: ExamSet = {
