@@ -8,6 +8,7 @@ import { TeacherAnswerKeyView } from './components/TeacherAnswerKeyView';
 import { ExamGeneratorModal } from './components/ExamGeneratorModal';
 import { PrintExamModal } from './components/PrintExamModal';
 import { ExamBankModal } from './components/ExamBankModal';
+import { SettingsModal } from './components/SettingsModal';
 import {
   Tv,
   Radio,
@@ -19,6 +20,7 @@ import {
   GraduationCap,
   Layers,
   HelpCircle,
+  Settings,
 } from 'lucide-react';
 
 const SAVED_EXAMS_KEY = 'primary_exam_saved_bank';
@@ -97,6 +99,7 @@ export default function App() {
   // Modals state
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
   const [isBankOpen, setIsBankOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [printModalConfig, setPrintModalConfig] = useState<{
     isOpen: boolean;
     mode: 'answer_key' | 'student_sheet' | 'exam_paper';
@@ -290,6 +293,14 @@ export default function App() {
             >
               <Printer className="w-5 h-5 text-amber-400" />
             </button>
+
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              title="ตั้งค่าโมเดล AI & API Keys (Gemini, OpenAI, Groq, OpenRouter, DeepSeek)"
+            >
+              <Settings className="w-5 h-5 text-slate-300 hover:text-white" />
+            </button>
           </div>
         </div>
       </header>
@@ -372,6 +383,10 @@ export default function App() {
         isOpen={isGeneratorOpen}
         onClose={() => setIsGeneratorOpen(false)}
         onExamGenerated={handleExamGenerated}
+        onOpenSettings={() => {
+          setIsGeneratorOpen(false);
+          setIsSettingsOpen(true);
+        }}
       />
 
       <ExamBankModal
@@ -394,6 +409,14 @@ export default function App() {
         onClose={() => setPrintModalConfig({ isOpen: false, mode: 'student_sheet' })}
         exam={currentExam}
         mode={printModalConfig.mode}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onSettingsSaved={() => {
+          showToast('บันทึกการตั้งค่าโมเดล AI & API Keys เรียบร้อยแล้ว');
+        }}
       />
     </div>
   );

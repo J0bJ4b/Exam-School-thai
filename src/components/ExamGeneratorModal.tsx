@@ -20,15 +20,20 @@ import {
   Cpu,
   Key,
   ShieldCheck,
+  Settings,
 } from 'lucide-react';
+import {
+  AIProviderId,
+  loadAISettings,
+  saveAISettings,
+} from '../services/aiSettings';
 
 interface ExamGeneratorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onExamGenerated: (exam: ExamSet) => void;
+  onOpenSettings?: () => void;
 }
-
-export type AIProviderId = 'auto' | 'gemini' | 'groq' | 'openai' | 'openrouter' | 'deepseek';
 
 interface AIProviderInfo {
   id: AIProviderId;
@@ -87,6 +92,7 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
   isOpen,
   onClose,
   onExamGenerated,
+  onOpenSettings,
 }) => {
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel>('ป.3');
   const [selectedSubjectId, setSelectedSubjectId] = useState<SubjectId>('science');
@@ -104,8 +110,12 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [is503Error, setIs503Error] = useState(false);
 
+  // Sync settings from central AISettings service
   useEffect(() => {
     if (isOpen) {
+      const currentSettings = loadAISettings();
+      setSelectedProvider(currentSettings.selectedProvider || 'auto');
+
       fetch('/api/ai/providers')
         .then((res) => res.json())
         .then((data) => {
@@ -114,26 +124,51 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
           }
         })
         .catch(() => {});
-      const saved = localStorage.getItem(`ai_key_${selectedProvider}`);
-      if (saved) setCustomApiKey(saved);
     }
-  }, [isOpen, selectedProvider]);
+  }, [isOpen]);
+
+  // When selectedProvider changes, load the matching key from AISettings
+  useEffect(() => {
+    if (selectedProvider !== 'auto') {
+      const currentSettings = loadAISettings();
+      const keyForProvider = currentSettings.keys[selectedProvider as keyof typeof currentSettings.keys] || '';
+      setCustomApiKey(keyForProvider);
+    } else {
+      setCustomApiKey('');
+    }
+  }, [selectedProvider]);
+
+  // Listen to external settings update event
+  useEffect(() => {
+    const handleSettingsUpdated = (e: any) => {
+      const updated = e.detail;
+      if (updated?.selectedProvider) {
+        setSelectedProvider(updated.selectedProvider);
+      }
+    };
+    window.addEventListener('ai_settings_updated', handleSettingsUpdated);
+    return () => window.removeEventListener('ai_settings_updated', handleSettingsUpdated);
+  }, []);
 
   const handleProviderSelect = (pId: AIProviderId) => {
     setSelectedProvider(pId);
-    const saved = localStorage.getItem(`ai_key_${pId}`);
-    setCustomApiKey(saved || '');
-    if (pId !== 'auto' && pId !== 'gemini') {
-      setShowKeyInput(true);
+    const currentSettings = loadAISettings();
+    currentSettings.selectedProvider = pId;
+    saveAISettings(currentSettings);
+
+    if (pId !== 'auto') {
+      const key = currentSettings.keys[pId as keyof typeof currentSettings.keys] || '';
+      setCustomApiKey(key);
+      if (!key) setShowKeyInput(true);
     }
   };
 
   const handleKeyChange = (val: string) => {
     setCustomApiKey(val);
-    if (val.trim()) {
-      localStorage.setItem(`ai_key_${selectedProvider}`, val.trim());
-    } else {
-      localStorage.removeItem(`ai_key_${selectedProvider}`);
+    if (selectedProvider !== 'auto') {
+      const currentSettings = loadAISettings();
+      currentSettings.keys[selectedProvider as keyof typeof currentSettings.keys] = val.trim();
+      saveAISettings(currentSettings);
     }
   };
 
@@ -318,14 +353,27 @@ export const ExamGeneratorModal: React.FC<ExamGeneratorModalProps> = ({
                 <Cpu className="w-4 h-4 text-purple-400" />
                 <span>เลือกโมเดล AI สำหรับออกข้อสอบ:</span>
               </label>
-              <button
-                type="button"
-                onClick={() => setShowKeyInput(!showKeyInput)}
-                className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors"
-              >
-                <Key className="w-3.5 h-3.5" />
-                <span>{showKeyInput ? 'ซ่อนช่องใส่ API Key' : 'ตั้งค่า API Key เอง'}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {onOpenSettings && (
+                  <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800"
+                    title="ไปที่เมนูตั้งค่า API Keys ทั้งหมด"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>เมนูตั้งค่า API</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowKeyInput(!showKeyInput)}
+                  className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>{showKeyInput ? 'ซ่อน' : 'ใส่ Key'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Provider Cards */}

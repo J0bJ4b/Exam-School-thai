@@ -186,6 +186,14 @@ ${additionalPrompt ? `- คำขอเพิ่มเติมจากคร�
       );
     } else {
       // Default to Google Gemini with retry loop and failover
+      const activeGeminiKey = customApiKey || process.env.GEMINI_API_KEY || '';
+      const geminiClient = activeGeminiKey
+        ? new GoogleGenAI({
+            apiKey: activeGeminiKey,
+            httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+          })
+        : ai;
+
       const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
       let response: any = null;
       let lastError: any = null;
@@ -193,7 +201,7 @@ ${additionalPrompt ? `- คำขอเพิ่มเติมจากคร�
       for (let attempt = 0; attempt < modelsToTry.length; attempt++) {
         const currentModel = modelsToTry[attempt];
         try {
-          response = await ai.models.generateContent({
+          response = await geminiClient.models.generateContent({
             model: currentModel,
             contents: promptText,
             config: {
